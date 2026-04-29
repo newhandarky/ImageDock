@@ -3,6 +3,8 @@ import {
   AlertCircle,
   Cloud,
   Copy,
+  Folder,
+  FolderPlus,
   ImagePlus,
   Images,
   Loader2,
@@ -17,10 +19,16 @@ import {
 type ImageItem = {
   key: string;
   name: string;
+  folder: string;
   size: number;
   type: string;
   uploadedAt: string;
   url: string;
+};
+
+type FolderItem = {
+  name: string;
+  imageCount: number;
 };
 
 type UsageSummary = {
@@ -36,6 +44,7 @@ type UsageSummary = {
 
 type ImagesResponse = {
   images: ImageItem[];
+  folders: FolderItem[];
 };
 
 type UsageResponse = {
@@ -48,6 +57,8 @@ type SessionResponse = {
 
 const maxUploadBytes = 25 * 1024 * 1024;
 const maxUploadCount = 20;
+const allFolders = '__all__';
+const defaultFolder = '未分類';
 
 function formatBytes(bytes: number) {
   if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
@@ -81,8 +92,12 @@ export default function App() {
   const [isCheckingSession, setIsCheckingSession] = useState(true);
   const [password, setPassword] = useState('');
   const [images, setImages] = useState<ImageItem[]>([]);
+  const [folders, setFolders] = useState<FolderItem[]>([{ name: defaultFolder, imageCount: 0 }]);
   const [usage, setUsage] = useState<UsageSummary | null>(null);
   const [query, setQuery] = useState('');
+  const [activeFolder, setActiveFolder] = useState(allFolders);
+  const [uploadFolder, setUploadFolder] = useState(defaultFolder);
+  const [newFolderName, setNewFolderName] = useState('');
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -92,15 +107,18 @@ export default function App() {
   const [copyStatus, setCopyStatus] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const selected = images.find((image) => image.key === selectedKey) ?? images[0];
-
   const filteredImages = useMemo(() => {
     const keyword = query.trim().toLowerCase();
+    const scopedImages =
+      activeFolder === allFolders ? images : images.filter((image) => image.folder === activeFolder);
 
-    if (!keyword) return images;
+    if (!keyword) return scopedImages;
 
-    return images.filter((image) => image.name.toLowerCase().includes(keyword));
-  }, [images, query]);
+    return scopedImages.filter((image) => image.name.toLowerCase().includes(keyword));
+  }, [activeFolder, images, query]);
+
+  const selected =
+    filteredImages.find((image) => image.key === selectedKey) ?? filteredImages[0] ?? images[0];
 
   const refreshData = async () => {
     setError(null);
@@ -113,10 +131,15 @@ export default function App() {
       ]);
 
       setImages(imagesPayload.images);
+      setFolders(imagesPayload.folders);
       setUsage(usagePayload.usage);
       setSelectedKey((current) => {
-        if (current && imagesPayload.images.some((image) => image.key === current)) return current;
-        return imagesPayload.images[0]?.key ?? null;
+        const scopedImages =
+          activeFolder === allFolders
+            ? imagesPayload.images
+            : imagesPayload.images.filter((image) => image.folder === activeFolder);
+        if (current && scopedImages.some((image) => image.key === current)) return current;
+        return scopedImages[0]?.key ?? imagesPayload.images[0]?.key ?? null;
       });
     } catch (requestError) {
       const message = requestError instanceof Error ? requestError.message : '無法讀取 R2 資料';
@@ -174,6 +197,7 @@ export default function App() {
   const logout = async () => {
     await fetch('/api/auth', { method: 'DELETE' }).catch(() => null);
     setImages([]);
+    setFolders([{ name: defaultFolder, imageCount: 0 }]);
     setUsage(null);
     setSelectedKey(null);
     setIsAuthenticated(false);
@@ -199,6 +223,7 @@ export default function App() {
     try {
       const formData = new FormData();
       imageFiles.forEach((file) => formData.append('files', file));
+      formData.append('folder', uploadFolder);
 
       const payload = await fetch('/api/images', {
         method: 'POST',
@@ -206,6 +231,8 @@ export default function App() {
       }).then((response) => parseJsonResponse<ImagesResponse>(response));
 
       setImages(payload.images);
+      setFolders(payload.folders);
+      setActiveFolder(uploadFolder);
       setSelectedKey(payload.images[0]?.key ?? null);
       await refreshData();
     } catch (uploadError) {
@@ -237,6 +264,7 @@ export default function App() {
       }).then((response) => parseJsonResponse<ImagesResponse>(response));
 
       setImages(payload.images);
+      setFolders(payload.folders);
       setSelectedKey(payload.images[0]?.key ?? null);
       await refreshData();
     } catch (deleteError) {
@@ -251,6 +279,31 @@ export default function App() {
       window.setTimeout(() => setCopyStatus(null), 1800);
     } catch {
       setError('無法複製網址，請手動選取。');
+    }
+  };
+
+  const createFolder = async () => {
+    const folder = newFolderName.trim();
+    if (!folder) return;
+
+    setError(null);
+
+    try {
+      const payload = await fetch('/api/images', {
+        method: 'PATCH',
+        headers: {
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ folder }),
+      }).then((response) => parseJsonResponse<ImagesResponse>(response));
+
+      setImages(payload.images);
+      setFolders(payload.folders);
+      setActiveFolder(folder);
+      setUploadFolder(folder);
+      setNewFolderName('');
+    } catch (folderError) {
+      setError(folderError instanceof Error ? folderError.message : '建立資料夾失敗');
     }
   };
 
@@ -354,6 +407,48 @@ export default function App() {
 
       <section className="workspace">
         <aside className="library-panel">
+          <div className="folder-panel">
+            <div className="folder-heading">
+              <span>
+                <Folder size={17} />
+                資料夾
+              </span>
+            </div>
+            <button
+              className={`folder-row ${activeFolder === allFolders ? 'is-active' : ''}`}
+              onClick={() => setActiveFolder(allFolders)}
+            >
+              <span>全部圖片</span>
+              <strong>{images.length}</strong>
+            </button>
+            {folders.map((folder) => (
+              <button
+                key={folder.name}
+                className={`folder-row ${activeFolder === folder.name ? 'is-active' : ''}`}
+                onClick={() => {
+                  setActiveFolder(folder.name);
+                  setUploadFolder(folder.name);
+                }}
+              >
+                <span>{folder.name}</span>
+                <strong>{folder.imageCount}</strong>
+              </button>
+            ))}
+            <div className="new-folder">
+              <input
+                value={newFolderName}
+                onChange={(event) => setNewFolderName(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') void createFolder();
+                }}
+                placeholder="新增資料夾"
+              />
+              <button onClick={() => void createFolder()} aria-label="新增資料夾">
+                <FolderPlus size={17} />
+              </button>
+            </div>
+          </div>
+
           <div
             className={`drop-zone ${isDragging ? 'is-dragging' : ''}`}
             onDragEnter={() => setIsDragging(true)}
@@ -372,6 +467,17 @@ export default function App() {
               onChange={handleInputChange}
             />
           </div>
+
+          <label className="folder-select">
+            <span>上傳到</span>
+            <select value={uploadFolder} onChange={(event) => setUploadFolder(event.target.value)}>
+              {folders.map((folder) => (
+                <option key={folder.name} value={folder.name}>
+                  {folder.name}
+                </option>
+              ))}
+            </select>
+          </label>
 
           <label className="search-box">
             <Search size={17} />
@@ -407,6 +513,7 @@ export default function App() {
                 <span>
                   <strong>{image.name}</strong>
                   <small>{formatBytes(image.size)}</small>
+                  <small>{image.folder}</small>
                 </span>
               </button>
             ))}
@@ -438,6 +545,10 @@ export default function App() {
                   <div>
                     <dt>大小</dt>
                     <dd>{formatBytes(selected.size)}</dd>
+                  </div>
+                  <div>
+                    <dt>資料夾</dt>
+                    <dd>{selected.folder}</dd>
                   </div>
                   <div>
                     <dt>上傳時間</dt>

@@ -21,7 +21,8 @@ body {
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
 }
 
@@ -248,6 +249,96 @@ h2 {
 
 .drop-zone input {
   display: none;
+}
+
+.folder-panel {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.folder-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: #526367;
+  font-size: 0.86rem;
+  font-weight: 800;
+}
+
+.folder-heading span,
+.folder-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.folder-row {
+  justify-content: space-between;
+  width: 100%;
+  min-height: 38px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding: 0 10px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+
+.folder-row:hover,
+.folder-row.is-active {
+  border-color: #98bbb7;
+  background: #eef7f5;
+}
+
+.folder-row span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.folder-row strong {
+  flex: 0 0 auto;
+  color: #68767a;
+  font-size: 0.82rem;
+}
+
+.new-folder {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 40px;
+  gap: 8px;
+}
+
+.new-folder input,
+.folder-select select {
+  min-width: 0;
+  min-height: 38px;
+  border: 1px solid #d8e1e2;
+  border-radius: 8px;
+  padding: 0 10px;
+  background: white;
+  outline: 0;
+}
+
+.new-folder button {
+  display: inline-grid;
+  width: 40px;
+  height: 38px;
+  place-items: center;
+  border: 1px solid #d8e1e2;
+  border-radius: 8px;
+  background: white;
+  color: #1d6f68;
+}
+
+.folder-select {
+  display: grid;
+  gap: 6px;
+  margin-top: 14px;
+  color: #526367;
+  font-size: 0.84rem;
+  font-weight: 800;
 }
 
 .search-box,

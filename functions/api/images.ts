@@ -6,13 +6,22 @@ type Env = {
 type ImageItem = {
   key: string;
   name: string;
+  folder: string;
   size: number;
   type: string;
   uploadedAt: string;
   url: string;
 };
 
+type FolderItem = {
+  name: string;
+  imageCount: number;
+};
+
 const maxUploadBytes = 25 * 1024 * 1024;
+const defaultFolder = '未分類';
+const uploadPrefix = 'uploads/';
+const folderMarkerPrefix = '.folders/';
 
 function json(data: unknown, status = 200) {
   return Response.json(data, {
@@ -40,6 +49,24 @@ function sanitizeFileName(name: string) {
     .slice(0, 120) || 'image';
 }
 
+function sanitizeFolderName(name: string) {
+  const folder = name.trim().replace(/[\\/]+/g, '-').replace(/\s{2,}/g, ' ').slice(0, 80);
+  return folder || defaultFolder;
+}
+
+function folderMarkerKey(folder: string) {
+  return `${folderMarkerPrefix}${encodeURIComponent(folder)}.json`;
+}
+
+function getFolderFromKey(key: string) {
+  if (!key.startsWith(uploadPrefix)) return defaultFolder;
+
+  const rest = key.slice(uploadPrefix.length);
+  if (!rest.includes('/')) return defaultFolder;
+
+  return rest.split('/')[0] || defaultFolder;
+}
+
 function encodeKeyPath(key: string) {
   return key.split('/').map(encodeURIComponent).join('/');
 }
@@ -53,11 +80,39 @@ function toImageItem(env: Env, object: R2Object): ImageItem {
   return {
     key: object.key,
     name: object.customMetadata?.originalName || object.key.split('/').pop() || object.key,
+    folder: object.customMetadata?.folder || getFolderFromKey(object.key),
     size: object.size,
     type: object.httpMetadata?.contentType || 'application/octet-stream',
     uploadedAt: object.uploaded?.toISOString() || object.customMetadata?.uploadedAt || new Date().toISOString(),
     url: imageUrl(env, object.key),
   };
+}
+
+function buildFolders(objects: R2Object[]) {
+  const counts = new Map<string, number>();
+
+  objects.forEach((object) => {
+    if (object.key.startsWith(folderMarkerPrefix)) {
+      const folder = object.customMetadata?.folder;
+      if (folder && !counts.has(folder)) counts.set(folder, 0);
+      return;
+    }
+
+    if (object.httpMetadata?.contentType?.startsWith('image/')) {
+      const folder = object.customMetadata?.folder || getFolderFromKey(object.key);
+      counts.set(folder, (counts.get(folder) ?? 0) + 1);
+    }
+  });
+
+  if (!counts.has(defaultFolder)) counts.set(defaultFolder, 0);
+
+  return Array.from(counts.entries())
+    .map(([name, imageCount]) => ({ name, imageCount }))
+    .sort((first, second) => {
+      if (first.name === defaultFolder) return -1;
+      if (second.name === defaultFolder) return 1;
+      return first.name.localeCompare(second.name, 'zh-Hant');
+    });
 }
 
 async function listImages(env: Env) {
@@ -74,7 +129,7 @@ async function listImages(env: Env) {
     cursor = page.truncated ? page.cursor : undefined;
   } while (cursor);
 
-  return objects
+  const images = objects
     .filter((object) => object.httpMetadata?.contentType?.startsWith('image/'))
     .sort((first, second) => {
       const firstTime = first.uploaded?.getTime() ?? 0;
@@ -82,12 +137,16 @@ async function listImages(env: Env) {
       return secondTime - firstTime;
     })
     .map((object) => toImageItem(env, object));
+
+  return {
+    folders: buildFolders(objects),
+    images,
+  };
 }
 
 export async function onRequestGet({ env }: { env: Env }) {
   try {
-    const images = await listImages(env);
-    return json({ images });
+    return json(await listImages(env));
   } catch (error) {
     return json({ error: error instanceof Error ? error.message : '無法讀取圖片列表' }, 500);
   }
@@ -98,8 +157,18 @@ export async function onRequestPost({ request, env }: { request: Request; env: E
     const bucket = getBucket(env);
     const formData = await request.formData();
     const files = formData.getAll('files').filter((value): value is File => value instanceof File);
+    const folder = sanitizeFolderName(String(formData.get('folder') || defaultFolder));
 
     if (files.length === 0) return json({ error: '請選擇至少一張圖片。' }, 400);
+
+    await bucket.put(folderMarkerKey(folder), JSON.stringify({ folder, createdAt: new Date().toISOString() }), {
+      httpMetadata: {
+        contentType: 'application/json',
+      },
+      customMetadata: {
+        folder,
+      },
+    });
 
     await Promise.all(
       files.map(async (file) => {
@@ -112,7 +181,7 @@ export async function onRequestPost({ request, env }: { request: Request; env: E
         }
 
         const safeName = sanitizeFileName(file.name);
-        const key = `uploads/${Date.now()}-${crypto.randomUUID()}-${safeName}`;
+        const key = `${uploadPrefix}${folder}/${Date.now()}-${crypto.randomUUID()}-${safeName}`;
 
         await bucket.put(key, file.stream(), {
           httpMetadata: {
@@ -120,14 +189,14 @@ export async function onRequestPost({ request, env }: { request: Request; env: E
           },
           customMetadata: {
             originalName: file.name,
+            folder,
             uploadedAt: new Date().toISOString(),
           },
         });
       }),
     );
 
-    const images = await listImages(env);
-    return json({ images }, 201);
+    return json(await listImages(env), 201);
   } catch (error) {
     return json({ error: error instanceof Error ? error.message : '上傳圖片失敗' }, 500);
   }
@@ -141,9 +210,29 @@ export async function onRequestDelete({ request, env }: { request: Request; env:
     if (!key) return json({ error: '缺少要刪除的圖片 key。' }, 400);
 
     await bucket.delete(key);
-    const images = await listImages(env);
-    return json({ images });
+    return json(await listImages(env));
   } catch (error) {
     return json({ error: error instanceof Error ? error.message : '刪除圖片失敗' }, 500);
+  }
+}
+
+export async function onRequestPatch({ request, env }: { request: Request; env: Env }) {
+  try {
+    const bucket = getBucket(env);
+    const payload = (await request.json().catch(() => null)) as { folder?: string } | null;
+    const folder = sanitizeFolderName(payload?.folder || '');
+
+    await bucket.put(folderMarkerKey(folder), JSON.stringify({ folder, createdAt: new Date().toISOString() }), {
+      httpMetadata: {
+        contentType: 'application/json',
+      },
+      customMetadata: {
+        folder,
+      },
+    });
+
+    return json(await listImages(env), 201);
+  } catch (error) {
+    return json({ error: error instanceof Error ? error.message : '建立資料夾失敗' }, 500);
   }
 }

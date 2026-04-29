@@ -18,6 +18,7 @@ type R2Bucket = {
   list(options?: {
     cursor?: string;
     include?: Array<'httpMetadata' | 'customMetadata'>;
+    prefix?: string;
   }): Promise<{
     objects: R2Object[];
     truncated: boolean;
@@ -26,7 +27,7 @@ type R2Bucket = {
   get(key: string): Promise<R2ObjectBody | null>;
   put(
     key: string,
-    value: ReadableStream,
+    value: ReadableStream | string,
     options?: {
       httpMetadata?: {
         contentType?: string;
