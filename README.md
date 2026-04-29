@@ -22,6 +22,8 @@ R2_PUBLIC_BASE_URL=
 R2_ACCESS_KEY_ID=
 R2_SECRET_ACCESS_KEY=
 CLOUDFLARE_API_TOKEN=
+ADMIN_PASSWORD=
+AUTH_SECRET=
 ```
 
 Cloudflare Pages 另外需要在 **Settings > Functions > R2 bucket bindings** 新增 binding：
@@ -30,6 +32,8 @@ Cloudflare Pages 另外需要在 **Settings > Functions > R2 bucket bindings** �
 - R2 bucket: `my-photo-storage`
 
 `R2_ACCESS_KEY_ID` 和 `R2_SECRET_ACCESS_KEY` 目前保留給後續 S3 相容 API 或外部工具使用；Pages Functions 操作 R2 會優先使用 `R2_BUCKET` binding，避免在前端暴露密鑰。
+
+`ADMIN_PASSWORD` 是登入 ImageDock 管理介面的密碼。`AUTH_SECRET` 可填任意高強度隨機字串，用來簽署登入 cookie；若未填，系統會用 `ADMIN_PASSWORD` 簽署。
 
 ## 開發
 

@@ -1,10 +1,13 @@
-import { ChangeEvent, DragEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { ChangeEvent, DragEvent, FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertCircle,
   Cloud,
+  Copy,
   ImagePlus,
   Images,
   Loader2,
+  Lock,
+  LogOut,
   RefreshCw,
   Search,
   Trash2,
@@ -39,6 +42,13 @@ type UsageResponse = {
   usage: UsageSummary;
 };
 
+type SessionResponse = {
+  authenticated: boolean;
+};
+
+const maxUploadBytes = 25 * 1024 * 1024;
+const maxUploadCount = 20;
+
 function formatBytes(bytes: number) {
   if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
   if (bytes < 1024) return `${bytes} B`;
@@ -67,6 +77,9 @@ async function parseJsonResponse<T>(response: Response): Promise<T> {
 }
 
 export default function App() {
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isCheckingSession, setIsCheckingSession] = useState(true);
+  const [password, setPassword] = useState('');
   const [images, setImages] = useState<ImageItem[]>([]);
   const [usage, setUsage] = useState<UsageSummary | null>(null);
   const [query, setQuery] = useState('');
@@ -74,7 +87,9 @@ export default function App() {
   const [isDragging, setIsDragging] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isUploading, setIsUploading] = useState(false);
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [copyStatus, setCopyStatus] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const selected = images.find((image) => image.key === selectedKey) ?? images[0];
@@ -104,19 +119,79 @@ export default function App() {
         return imagesPayload.images[0]?.key ?? null;
       });
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : '無法讀取 R2 資料');
+      const message = requestError instanceof Error ? requestError.message : '無法讀取 R2 資料';
+      setError(message);
+      if (message.includes('未登入') || message.includes('Unauthorized')) setIsAuthenticated(false);
     } finally {
       setIsLoading(false);
     }
   };
 
   useEffect(() => {
-    void refreshData();
+    const checkSession = async () => {
+      try {
+        const payload = await fetch('/api/session').then((response) =>
+          parseJsonResponse<SessionResponse>(response),
+        );
+        setIsAuthenticated(payload.authenticated);
+      } catch {
+        setIsAuthenticated(false);
+      } finally {
+        setIsCheckingSession(false);
+      }
+    };
+
+    void checkSession();
   }, []);
+
+  useEffect(() => {
+    if (isAuthenticated) void refreshData();
+  }, [isAuthenticated]);
+
+  const login = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setError(null);
+    setIsLoggingIn(true);
+
+    try {
+      await fetch('/api/auth', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ password }),
+      }).then((response) => parseJsonResponse<SessionResponse>(response));
+
+      setPassword('');
+      setIsAuthenticated(true);
+    } catch (loginError) {
+      setError(loginError instanceof Error ? loginError.message : '登入失敗');
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
+
+  const logout = async () => {
+    await fetch('/api/auth', { method: 'DELETE' }).catch(() => null);
+    setImages([]);
+    setUsage(null);
+    setSelectedKey(null);
+    setIsAuthenticated(false);
+  };
 
   const addFiles = async (files: FileList | File[]) => {
     const imageFiles = Array.from(files).filter((file) => file.type.startsWith('image/'));
     if (imageFiles.length === 0) return;
+    if (imageFiles.length > maxUploadCount) {
+      setError(`一次最多上傳 ${maxUploadCount} 張圖片。`);
+      return;
+    }
+
+    const oversizedFile = imageFiles.find((file) => file.size > maxUploadBytes);
+    if (oversizedFile) {
+      setError(`${oversizedFile.name} 超過 ${formatBytes(maxUploadBytes)} 上傳限制。`);
+      return;
+    }
 
     setError(null);
     setIsUploading(true);
@@ -169,7 +244,62 @@ export default function App() {
     }
   };
 
+  const copyImageUrl = async (url: string) => {
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopyStatus('已複製圖片網址');
+      window.setTimeout(() => setCopyStatus(null), 1800);
+    } catch {
+      setError('無法複製網址，請手動選取。');
+    }
+  };
+
   const totalSize = usage?.payloadSize ?? images.reduce((sum, image) => sum + image.size, 0);
+
+  if (isCheckingSession) {
+    return (
+      <main className="auth-shell">
+        <div className="auth-panel">
+          <Loader2 className="spin" size={24} />
+          <h1>ImageDock</h1>
+        </div>
+      </main>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return (
+      <main className="auth-shell">
+        <form className="auth-panel" onSubmit={login}>
+          <div className="auth-icon">
+            <Lock size={22} />
+          </div>
+          <p className="eyebrow">Private R2 manager</p>
+          <h1>ImageDock</h1>
+          <label>
+            <span>管理密碼</span>
+            <input
+              type="password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              placeholder="輸入 Cloudflare Pages 設定的 ADMIN_PASSWORD"
+              autoComplete="current-password"
+            />
+          </label>
+          {error ? (
+            <div className="alert compact" role="alert">
+              <AlertCircle size={18} />
+              <span>{error}</span>
+            </div>
+          ) : null}
+          <button className="primary-button" type="submit" disabled={isLoggingIn || !password}>
+            {isLoggingIn ? <Loader2 className="spin" size={18} /> : <Lock size={18} />}
+            登入
+          </button>
+        </form>
+      </main>
+    );
+  }
 
   return (
     <main className="app-shell">
@@ -181,6 +311,9 @@ export default function App() {
         <div className="header-actions">
           <button className="icon-button" onClick={() => void refreshData()} aria-label="重新整理">
             <RefreshCw size={18} />
+          </button>
+          <button className="icon-button" onClick={() => void logout()} aria-label="登出">
+            <LogOut size={18} />
           </button>
           <button
             className="primary-button"
@@ -230,7 +363,7 @@ export default function App() {
           >
             {isUploading ? <Loader2 className="spin" size={24} /> : <UploadCloud size={24} />}
             <strong>拖曳圖片到這裡</strong>
-            <span>檔案會直接上傳到 Cloudflare R2</span>
+            <span>最多 {maxUploadCount} 張，每張 {formatBytes(maxUploadBytes)} 以內</span>
             <input
               ref={fileInputRef}
               type="file"
@@ -313,6 +446,18 @@ export default function App() {
                   <div>
                     <dt>R2 Key</dt>
                     <dd>{selected.key}</dd>
+                  </div>
+                  <div>
+                    <dt>公開網址</dt>
+                    <dd>
+                      <button
+                        className="text-button"
+                        onClick={() => void copyImageUrl(selected.url)}
+                      >
+                        <Copy size={15} />
+                        {copyStatus || '複製網址'}
+                      </button>
+                    </dd>
                   </div>
                 </dl>
 
