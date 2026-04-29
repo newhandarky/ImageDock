@@ -29,6 +29,11 @@ button {
   cursor: pointer;
 }
 
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.72;
+}
+
 .app-shell {
   width: min(1280px, calc(100vw - 32px));
   margin: 0 auto;
@@ -41,6 +46,12 @@ button {
   justify-content: space-between;
   gap: 20px;
   margin-bottom: 22px;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .eyebrow {
@@ -67,8 +78,7 @@ h2 {
   overflow-wrap: anywhere;
 }
 
-.primary-button,
-.tag-editor button {
+.primary-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -82,9 +92,22 @@ h2 {
   font-weight: 800;
 }
 
+.alert {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 18px;
+  border: 1px solid #f3b8b0;
+  border-radius: 8px;
+  padding: 12px 14px;
+  background: #fff3f1;
+  color: #9f1f17;
+  font-weight: 700;
+}
+
 .summary-band {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 1px;
   overflow: hidden;
   margin-bottom: 18px;
@@ -112,6 +135,7 @@ h2 {
 .summary-band strong {
   margin-top: 4px;
   font-size: 1.35rem;
+  overflow-wrap: anywhere;
 }
 
 .workspace {
@@ -197,9 +221,23 @@ h2 {
 
 .image-list {
   display: grid;
+  align-content: start;
   gap: 8px;
   overflow: auto;
   padding-right: 2px;
+}
+
+.inline-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 68px;
+  border: 1px solid #d8e1e2;
+  border-radius: 8px;
+  background: white;
+  color: #68767a;
+  font-weight: 700;
 }
 
 .image-row {
@@ -305,7 +343,7 @@ h2 {
 
 .metadata {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
   margin: 18px 0;
 }
@@ -323,34 +361,50 @@ h2 {
   font-weight: 800;
 }
 
-.tag-editor {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 10px;
+.usage-panel {
+  border: 1px solid #d8e1e2;
+  border-radius: 8px;
+  overflow: hidden;
 }
 
-.tags {
+.usage-heading {
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 14px;
-}
-
-.tags button {
-  display: inline-flex;
   align-items: center;
-  gap: 6px;
-  min-height: 34px;
-  border: 1px solid #bed2cf;
-  border-radius: 999px;
-  padding: 0 10px 0 12px;
-  background: #edf7f5;
-  color: #1d4f4a;
-  font-weight: 800;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 12px;
+  background: #f4f8f7;
 }
 
-.empty-tags {
+.operation-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  background: #d8e1e2;
+}
+
+.operation-list div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  padding: 12px;
+  background: white;
+}
+
+.operation-list span {
+  min-width: 0;
+  overflow: hidden;
   color: #68767a;
+  font-size: 0.88rem;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.operation-list strong {
+  flex: 0 0 auto;
 }
 
 .empty-state {
@@ -384,9 +438,15 @@ h2 {
     flex-direction: column;
   }
 
+  .header-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+
   .summary-band,
   .workspace,
-  .metadata {
+  .metadata,
+  .operation-list {
     grid-template-columns: 1fr;
   }
 
@@ -399,7 +459,17 @@ h2 {
     min-height: 260px;
   }
 
-  .tag-editor {
-    grid-template-columns: 1fr;
+  .primary-button {
+    flex: 1;
+  }
+}
+
+.spin {
+  animation: spin 900ms linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
   }
 }

@@ -1,37 +1,48 @@
-import { ChangeEvent, DragEvent, useMemo, useRef, useState } from 'react';
+import { ChangeEvent, DragEvent, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  AlertCircle,
+  Cloud,
   ImagePlus,
   Images,
+  Loader2,
+  RefreshCw,
   Search,
-  Tag,
   Trash2,
   UploadCloud,
-  X,
 } from 'lucide-react';
 
 type ImageItem = {
-  id: string;
+  key: string;
   name: string;
   size: number;
   type: string;
-  createdAt: string;
-  dataUrl: string;
-  tags: string[];
+  uploadedAt: string;
+  url: string;
 };
 
-const storageKey = 'imagedock.images';
+type UsageSummary = {
+  objectCount: number;
+  payloadSize: number;
+  metadataSize: number;
+  requestsLast24h: number;
+  operations: Array<{
+    actionType: string;
+    requests: number;
+  }>;
+};
 
-function loadImages(): ImageItem[] {
-  try {
-    return JSON.parse(localStorage.getItem(storageKey) ?? '[]') as ImageItem[];
-  } catch {
-    return [];
-  }
-}
+type ImagesResponse = {
+  images: ImageItem[];
+};
+
+type UsageResponse = {
+  usage: UsageSummary;
+};
 
 function formatBytes(bytes: number) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
   if (bytes < 1024) return `${bytes} B`;
-  const units = ['KB', 'MB', 'GB'];
+  const units = ['KB', 'MB', 'GB', 'TB'];
   let value = bytes / 1024;
   let unit = units[0];
 
@@ -43,61 +54,90 @@ function formatBytes(bytes: number) {
   return `${value.toFixed(value >= 10 ? 0 : 1)} ${unit}`;
 }
 
-function fileToImageItem(file: File): Promise<ImageItem> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
+async function parseJsonResponse<T>(response: Response): Promise<T> {
+  const payload = (await response.json().catch(() => null)) as T | { error?: string } | null;
 
-    reader.onload = () => {
-      resolve({
-        id: crypto.randomUUID(),
-        name: file.name,
-        size: file.size,
-        type: file.type,
-        createdAt: new Date().toISOString(),
-        dataUrl: String(reader.result),
-        tags: [],
-      });
-    };
+  if (!response.ok) {
+    const message =
+      payload && typeof payload === 'object' && 'error' in payload ? payload.error : undefined;
+    throw new Error(message || 'API request failed');
+  }
 
-    reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(file);
-  });
+  return payload as T;
 }
 
 export default function App() {
-  const [images, setImages] = useState<ImageItem[]>(loadImages);
+  const [images, setImages] = useState<ImageItem[]>([]);
+  const [usage, setUsage] = useState<UsageSummary | null>(null);
   const [query, setQuery] = useState('');
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [tagInput, setTagInput] = useState('');
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isUploading, setIsUploading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const selected = images.find((image) => image.id === selectedId) ?? images[0];
+  const selected = images.find((image) => image.key === selectedKey) ?? images[0];
 
   const filteredImages = useMemo(() => {
     const keyword = query.trim().toLowerCase();
 
     if (!keyword) return images;
 
-    return images.filter((image) => {
-      const tagText = image.tags.join(' ').toLowerCase();
-      return image.name.toLowerCase().includes(keyword) || tagText.includes(keyword);
-    });
+    return images.filter((image) => image.name.toLowerCase().includes(keyword));
   }, [images, query]);
 
-  const persistImages = (nextImages: ImageItem[]) => {
-    setImages(nextImages);
-    localStorage.setItem(storageKey, JSON.stringify(nextImages));
+  const refreshData = async () => {
+    setError(null);
+    setIsLoading(true);
+
+    try {
+      const [imagesPayload, usagePayload] = await Promise.all([
+        fetch('/api/images').then((response) => parseJsonResponse<ImagesResponse>(response)),
+        fetch('/api/usage').then((response) => parseJsonResponse<UsageResponse>(response)),
+      ]);
+
+      setImages(imagesPayload.images);
+      setUsage(usagePayload.usage);
+      setSelectedKey((current) => {
+        if (current && imagesPayload.images.some((image) => image.key === current)) return current;
+        return imagesPayload.images[0]?.key ?? null;
+      });
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : '無法讀取 R2 資料');
+    } finally {
+      setIsLoading(false);
+    }
   };
+
+  useEffect(() => {
+    void refreshData();
+  }, []);
 
   const addFiles = async (files: FileList | File[]) => {
     const imageFiles = Array.from(files).filter((file) => file.type.startsWith('image/'));
     if (imageFiles.length === 0) return;
 
-    const nextItems = await Promise.all(imageFiles.map(fileToImageItem));
-    const nextImages = [...nextItems, ...images];
-    persistImages(nextImages);
-    setSelectedId(nextItems[0].id);
+    setError(null);
+    setIsUploading(true);
+
+    try {
+      const formData = new FormData();
+      imageFiles.forEach((file) => formData.append('files', file));
+
+      const payload = await fetch('/api/images', {
+        method: 'POST',
+        body: formData,
+      }).then((response) => parseJsonResponse<ImagesResponse>(response));
+
+      setImages(payload.images);
+      setSelectedKey(payload.images[0]?.key ?? null);
+      await refreshData();
+    } catch (uploadError) {
+      setError(uploadError instanceof Error ? uploadError.message : '上傳圖片失敗');
+    } finally {
+      setIsUploading(false);
+    }
   };
 
   const handleInputChange = (event: ChangeEvent<HTMLInputElement>) => {
@@ -111,63 +151,71 @@ export default function App() {
     void addFiles(event.dataTransfer.files);
   };
 
-  const addTag = () => {
-    const value = tagInput.trim();
-    if (!selected || !value || selected.tags.includes(value)) return;
+  const deleteImage = async (key: string) => {
+    if (!confirm('確定要刪除這張圖片嗎？')) return;
 
-    persistImages(
-      images.map((image) =>
-        image.id === selected.id ? { ...image, tags: [...image.tags, value] } : image,
-      ),
-    );
-    setTagInput('');
+    setError(null);
+
+    try {
+      const payload = await fetch(`/api/images?key=${encodeURIComponent(key)}`, {
+        method: 'DELETE',
+      }).then((response) => parseJsonResponse<ImagesResponse>(response));
+
+      setImages(payload.images);
+      setSelectedKey(payload.images[0]?.key ?? null);
+      await refreshData();
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : '刪除圖片失敗');
+    }
   };
 
-  const removeTag = (tag: string) => {
-    if (!selected) return;
-
-    persistImages(
-      images.map((image) =>
-        image.id === selected.id
-          ? { ...image, tags: image.tags.filter((item) => item !== tag) }
-          : image,
-      ),
-    );
-  };
-
-  const deleteImage = (id: string) => {
-    const nextImages = images.filter((image) => image.id !== id);
-    persistImages(nextImages);
-    setSelectedId(nextImages[0]?.id ?? null);
-  };
-
-  const totalSize = images.reduce((sum, image) => sum + image.size, 0);
+  const totalSize = usage?.payloadSize ?? images.reduce((sum, image) => sum + image.size, 0);
 
   return (
     <main className="app-shell">
       <header className="topbar">
         <div>
-          <p className="eyebrow">Local image manager</p>
+          <p className="eyebrow">Cloudflare R2 image manager</p>
           <h1>ImageDock</h1>
         </div>
-        <button className="primary-button" onClick={() => fileInputRef.current?.click()}>
-          <ImagePlus size={18} />
-          上傳圖片
-        </button>
+        <div className="header-actions">
+          <button className="icon-button" onClick={() => void refreshData()} aria-label="重新整理">
+            <RefreshCw size={18} />
+          </button>
+          <button
+            className="primary-button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={isUploading}
+          >
+            {isUploading ? <Loader2 className="spin" size={18} /> : <ImagePlus size={18} />}
+            上傳圖片
+          </button>
+        </div>
       </header>
 
-      <section className="summary-band" aria-label="圖片摘要">
+      {error ? (
+        <div className="alert" role="alert">
+          <AlertCircle size={18} />
+          <span>{error}</span>
+        </div>
+      ) : null}
+
+      <section className="summary-band" aria-label="R2 使用摘要">
         <div>
           <span>圖片數</span>
-          <strong>{images.length}</strong>
+          <strong>{usage?.objectCount ?? images.length}</strong>
         </div>
         <div>
-          <span>總容量</span>
+          <span>儲存容量</span>
           <strong>{formatBytes(totalSize)}</strong>
         </div>
         <div>
-          <span>標籤數</span>
-          <strong>{new Set(images.flatMap((image) => image.tags)).size}</strong>
+          <span>24 小時請求</span>
+          <strong>{usage?.requestsLast24h ?? 0}</strong>
+        </div>
+        <div>
+          <span>中繼資料</span>
+          <strong>{formatBytes(usage?.metadataSize ?? 0)}</strong>
         </div>
       </section>
 
@@ -180,9 +228,9 @@ export default function App() {
             onDragOver={(event) => event.preventDefault()}
             onDrop={handleDrop}
           >
-            <UploadCloud size={24} />
+            {isUploading ? <Loader2 className="spin" size={24} /> : <UploadCloud size={24} />}
             <strong>拖曳圖片到這裡</strong>
-            <span>支援 JPG、PNG、GIF、WebP 等圖片格式</span>
+            <span>檔案會直接上傳到 Cloudflare R2</span>
             <input
               ref={fileInputRef}
               type="file"
@@ -197,18 +245,32 @@ export default function App() {
             <input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="搜尋檔名或標籤"
+              placeholder="搜尋檔名"
             />
           </label>
 
           <div className="image-list">
+            {isLoading ? (
+              <div className="inline-state">
+                <Loader2 className="spin" size={20} />
+                <span>讀取 R2 圖片列表</span>
+              </div>
+            ) : null}
+
+            {!isLoading && filteredImages.length === 0 ? (
+              <div className="inline-state">
+                <Images size={20} />
+                <span>目前沒有圖片</span>
+              </div>
+            ) : null}
+
             {filteredImages.map((image) => (
               <button
-                key={image.id}
-                className={`image-row ${selected?.id === image.id ? 'is-selected' : ''}`}
-                onClick={() => setSelectedId(image.id)}
+                key={image.key}
+                className={`image-row ${selected?.key === image.key ? 'is-selected' : ''}`}
+                onClick={() => setSelectedKey(image.key)}
               >
-                <img src={image.dataUrl} alt={image.name} />
+                <img src={image.url} alt={image.name} />
                 <span>
                   <strong>{image.name}</strong>
                   <small>{formatBytes(image.size)}</small>
@@ -222,15 +284,15 @@ export default function App() {
           {selected ? (
             <>
               <div className="preview-area">
-                <img src={selected.dataUrl} alt={selected.name} />
+                <img src={selected.url} alt={selected.name} />
               </div>
               <div className="detail-content">
                 <div className="detail-heading">
                   <div>
-                    <p className="eyebrow">Selected image</p>
+                    <p className="eyebrow">Selected R2 object</p>
                     <h2>{selected.name}</h2>
                   </div>
-                  <button className="icon-button danger" onClick={() => deleteImage(selected.id)}>
+                  <button className="icon-button danger" onClick={() => void deleteImage(selected.key)}>
                     <Trash2 size={18} />
                   </button>
                 </div>
@@ -245,37 +307,30 @@ export default function App() {
                     <dd>{formatBytes(selected.size)}</dd>
                   </div>
                   <div>
-                    <dt>建立時間</dt>
-                    <dd>{new Date(selected.createdAt).toLocaleString('zh-TW')}</dd>
+                    <dt>上傳時間</dt>
+                    <dd>{new Date(selected.uploadedAt).toLocaleString('zh-TW')}</dd>
+                  </div>
+                  <div>
+                    <dt>R2 Key</dt>
+                    <dd>{selected.key}</dd>
                   </div>
                 </dl>
 
-                <div className="tag-editor">
-                  <label>
-                    <Tag size={17} />
-                    <input
-                      value={tagInput}
-                      onChange={(event) => setTagInput(event.target.value)}
-                      onKeyDown={(event) => {
-                        if (event.key === 'Enter') addTag();
-                      }}
-                      placeholder="新增標籤"
-                    />
-                  </label>
-                  <button onClick={addTag}>加入</button>
-                </div>
-
-                <div className="tags">
-                  {selected.tags.length > 0 ? (
-                    selected.tags.map((tag) => (
-                      <button key={tag} onClick={() => removeTag(tag)}>
-                        {tag}
-                        <X size={14} />
-                      </button>
-                    ))
-                  ) : (
-                    <span className="empty-tags">尚未設定標籤</span>
-                  )}
+                <div className="usage-panel">
+                  <div className="usage-heading">
+                    <Cloud size={18} />
+                    <strong>最近 24 小時操作</strong>
+                  </div>
+                  <div className="operation-list">
+                    {(usage?.operations.length ? usage.operations : [{ actionType: 'no data', requests: 0 }]).map(
+                      (operation) => (
+                        <div key={operation.actionType}>
+                          <span>{operation.actionType}</span>
+                          <strong>{operation.requests}</strong>
+                        </div>
+                      ),
+                    )}
+                  </div>
                 </div>
               </div>
             </>
@@ -283,7 +338,7 @@ export default function App() {
             <div className="empty-state">
               <Images size={42} />
               <h2>尚未上傳圖片</h2>
-              <p>從左側選取圖片，或直接拖曳檔案開始建立圖片庫。</p>
+              <p>從左側選取圖片，或直接拖曳檔案上傳到 R2。</p>
             </div>
           )}
         </section>
