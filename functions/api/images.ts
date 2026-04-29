@@ -49,6 +49,10 @@ function sanitizeFileName(name: string) {
     .slice(0, 120) || 'image';
 }
 
+function getFileNameFromKey(key: string) {
+  return key.split('/').pop() || 'image';
+}
+
 function sanitizeFolderName(name: string) {
   const folder = name.trim().replace(/[\\/]+/g, '-').replace(/\s{2,}/g, ' ').slice(0, 80);
   return folder || defaultFolder;
@@ -219,7 +223,49 @@ export async function onRequestDelete({ request, env }: { request: Request; env:
 export async function onRequestPatch({ request, env }: { request: Request; env: Env }) {
   try {
     const bucket = getBucket(env);
-    const payload = (await request.json().catch(() => null)) as { folder?: string } | null;
+    const payload = (await request.json().catch(() => null)) as {
+      folder?: string;
+      key?: string;
+      targetFolder?: string;
+    } | null;
+
+    if (payload?.key && payload.targetFolder) {
+      const targetFolder = sanitizeFolderName(payload.targetFolder);
+      const source = await bucket.get(payload.key);
+
+      if (!source) return json({ error: '找不到要移動的圖片。' }, 404);
+
+      const originalName =
+        source.customMetadata?.originalName || getFileNameFromKey(payload.key).replace(/^\d+-[\w-]+-/, '');
+      const destinationKey = `${uploadPrefix}${targetFolder}/${Date.now()}-${crypto.randomUUID()}-${sanitizeFileName(
+        originalName,
+      )}`;
+
+      await bucket.put(folderMarkerKey(targetFolder), JSON.stringify({ folder: targetFolder }), {
+        httpMetadata: {
+          contentType: 'application/json',
+        },
+        customMetadata: {
+          folder: targetFolder,
+        },
+      });
+
+      await bucket.copy(payload.key, destinationKey, {
+        httpMetadata: {
+          contentType: source.httpMetadata?.contentType,
+        },
+        customMetadata: {
+          ...source.customMetadata,
+          originalName,
+          folder: targetFolder,
+          movedAt: new Date().toISOString(),
+        },
+      });
+      await bucket.delete(payload.key);
+
+      return json(await listImages(env));
+    }
+
     const folder = sanitizeFolderName(payload?.folder || '');
 
     await bucket.put(folderMarkerKey(folder), JSON.stringify({ folder, createdAt: new Date().toISOString() }), {

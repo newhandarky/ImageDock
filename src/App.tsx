@@ -10,6 +10,7 @@ import {
   Loader2,
   Lock,
   LogOut,
+  MoveRight,
   RefreshCw,
   Search,
   Trash2,
@@ -97,6 +98,7 @@ export default function App() {
   const [query, setQuery] = useState('');
   const [activeFolder, setActiveFolder] = useState(allFolders);
   const [uploadFolder, setUploadFolder] = useState(defaultFolder);
+  const [moveFolder, setMoveFolder] = useState(defaultFolder);
   const [newFolderName, setNewFolderName] = useState('');
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -119,6 +121,10 @@ export default function App() {
 
   const selected =
     filteredImages.find((image) => image.key === selectedKey) ?? filteredImages[0] ?? images[0];
+
+  useEffect(() => {
+    if (selected) setMoveFolder(selected.folder);
+  }, [selected?.key, selected?.folder]);
 
   const refreshData = async () => {
     setError(null);
@@ -304,6 +310,33 @@ export default function App() {
       setNewFolderName('');
     } catch (folderError) {
       setError(folderError instanceof Error ? folderError.message : '建立資料夾失敗');
+    }
+  };
+
+  const moveImage = async () => {
+    if (!selected || selected.folder === moveFolder) return;
+
+    setError(null);
+
+    try {
+      const payload = await fetch('/api/images', {
+        method: 'PATCH',
+        headers: {
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          key: selected.key,
+          targetFolder: moveFolder,
+        }),
+      }).then((response) => parseJsonResponse<ImagesResponse>(response));
+
+      setImages(payload.images);
+      setFolders(payload.folders);
+      setActiveFolder(moveFolder);
+      setSelectedKey(payload.images.find((image) => image.name === selected.name && image.folder === moveFolder)?.key ?? null);
+      await refreshData();
+    } catch (moveError) {
+      setError(moveError instanceof Error ? moveError.message : '移動圖片失敗');
     }
   };
 
@@ -555,10 +588,6 @@ export default function App() {
                     <dd>{new Date(selected.uploadedAt).toLocaleString('zh-TW')}</dd>
                   </div>
                   <div>
-                    <dt>R2 Key</dt>
-                    <dd>{selected.key}</dd>
-                  </div>
-                  <div>
                     <dt>公開網址</dt>
                     <dd>
                       <button
@@ -571,6 +600,27 @@ export default function App() {
                     </dd>
                   </div>
                 </dl>
+
+                <div className="move-panel">
+                  <label>
+                    <span>移動到資料夾</span>
+                    <select value={moveFolder} onChange={(event) => setMoveFolder(event.target.value)}>
+                      {folders.map((folder) => (
+                        <option key={folder.name} value={folder.name}>
+                          {folder.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <button
+                    className="secondary-button"
+                    onClick={() => void moveImage()}
+                    disabled={!selected || selected.folder === moveFolder}
+                  >
+                    <MoveRight size={17} />
+                    移動
+                  </button>
+                </div>
 
                 <div className="usage-panel">
                   <div className="usage-heading">
