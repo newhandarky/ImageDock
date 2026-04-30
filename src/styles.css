@@ -211,6 +211,7 @@ h2 {
 
 .library-panel,
 .detail-panel {
+  height: 100%;
   border: 1px solid #d8e1e2;
   border-radius: 8px;
   background: #fbfdfc;
@@ -218,7 +219,6 @@ h2 {
 
 .library-panel {
   display: flex;
-  max-height: calc(100vh - 155px);
   min-height: 700px;
   flex-direction: column;
   padding: 14px;
