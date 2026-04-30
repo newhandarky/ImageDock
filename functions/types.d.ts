@@ -35,15 +35,5 @@ type R2Bucket = {
       customMetadata?: Record<string, string>;
     },
   ): Promise<R2Object>;
-  copy(
-    source: string,
-    destination: string,
-    options?: {
-      httpMetadata?: {
-        contentType?: string;
-      };
-      customMetadata?: Record<string, string>;
-    },
-  ): Promise<R2Object>;
   delete(key: string): Promise<void>;
 };

@@ -250,7 +250,7 @@ export async function onRequestPatch({ request, env }: { request: Request; env: 
         },
       });
 
-      await bucket.copy(payload.key, destinationKey, {
+      await bucket.put(destinationKey, source.body, {
         httpMetadata: {
           contentType: source.httpMetadata?.contentType,
         },
