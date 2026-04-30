@@ -364,6 +364,41 @@ h2 {
   margin: 14px 0;
 }
 
+.batch-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+  color: #526367;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.batch-toolbar span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.batch-toolbar div {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 6px;
+}
+
+.batch-toolbar button {
+  min-height: 32px;
+  border: 1px solid #bed2cf;
+  border-radius: 8px;
+  padding: 0 10px;
+  background: #edf7f5;
+  color: #1d4f4a;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
 .search-box input,
 .tag-editor input {
   width: 100%;
@@ -398,7 +433,7 @@ h2 {
 
 .image-row {
   display: grid;
-  grid-template-columns: 58px minmax(0, 1fr);
+  grid-template-columns: 22px 58px minmax(0, 1fr);
   gap: 10px;
   align-items: center;
   width: 100%;
@@ -407,6 +442,7 @@ h2 {
   padding: 8px;
   background: transparent;
   color: inherit;
+  cursor: pointer;
   text-align: left;
 }
 
@@ -421,6 +457,13 @@ h2 {
   height: 58px;
   border-radius: 6px;
   object-fit: cover;
+}
+
+.image-row input {
+  width: 18px;
+  height: 18px;
+  accent-color: #1d6f68;
+  cursor: pointer;
 }
 
 .image-row span {
@@ -565,6 +608,10 @@ h2 {
 
 .move-panel .secondary-button {
   align-self: end;
+}
+
+.batch-move-panel {
+  margin-top: 10px;
 }
 
 .usage-heading {

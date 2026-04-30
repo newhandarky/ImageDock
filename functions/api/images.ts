@@ -226,20 +226,14 @@ export async function onRequestPatch({ request, env }: { request: Request; env: 
     const payload = (await request.json().catch(() => null)) as {
       folder?: string;
       key?: string;
+      keys?: string[];
       targetFolder?: string;
     } | null;
 
-    if (payload?.key && payload.targetFolder) {
+    const moveKeys = Array.from(new Set([...(payload?.keys ?? []), ...(payload?.key ? [payload.key] : [])]));
+
+    if (moveKeys.length > 0 && payload?.targetFolder) {
       const targetFolder = sanitizeFolderName(payload.targetFolder);
-      const source = await bucket.get(payload.key);
-
-      if (!source) return json({ error: '找不到要移動的圖片。' }, 404);
-
-      const originalName =
-        source.customMetadata?.originalName || getFileNameFromKey(payload.key).replace(/^\d+-[\w-]+-/, '');
-      const destinationKey = `${uploadPrefix}${targetFolder}/${Date.now()}-${crypto.randomUUID()}-${sanitizeFileName(
-        originalName,
-      )}`;
 
       await bucket.put(folderMarkerKey(targetFolder), JSON.stringify({ folder: targetFolder }), {
         httpMetadata: {
@@ -250,18 +244,32 @@ export async function onRequestPatch({ request, env }: { request: Request; env: 
         },
       });
 
-      await bucket.put(destinationKey, source.body, {
-        httpMetadata: {
-          contentType: source.httpMetadata?.contentType,
-        },
-        customMetadata: {
-          ...source.customMetadata,
-          originalName,
-          folder: targetFolder,
-          movedAt: new Date().toISOString(),
-        },
-      });
-      await bucket.delete(payload.key);
+      await Promise.all(
+        moveKeys.map(async (key) => {
+          const source = await bucket.get(key);
+
+          if (!source) throw new Error(`找不到要移動的圖片：${key}`);
+
+          const originalName =
+            source.customMetadata?.originalName || getFileNameFromKey(key).replace(/^\d+-[\w-]+-/, '');
+          const destinationKey = `${uploadPrefix}${targetFolder}/${Date.now()}-${crypto.randomUUID()}-${sanitizeFileName(
+            originalName,
+          )}`;
+
+          await bucket.put(destinationKey, source.body, {
+            httpMetadata: {
+              contentType: source.httpMetadata?.contentType,
+            },
+            customMetadata: {
+              ...source.customMetadata,
+              originalName,
+              folder: targetFolder,
+              movedAt: new Date().toISOString(),
+            },
+          });
+          await bucket.delete(key);
+        }),
+      );
 
       return json(await listImages(env));
     }

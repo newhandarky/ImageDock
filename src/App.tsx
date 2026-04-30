@@ -101,6 +101,7 @@ export default function App() {
   const [moveFolder, setMoveFolder] = useState(defaultFolder);
   const [newFolderName, setNewFolderName] = useState('');
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const [checkedKeys, setCheckedKeys] = useState<string[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isUploading, setIsUploading] = useState(false);
@@ -121,10 +122,23 @@ export default function App() {
 
   const selected =
     filteredImages.find((image) => image.key === selectedKey) ?? filteredImages[0] ?? images[0];
+  const checkedKeySet = useMemo(() => new Set(checkedKeys), [checkedKeys]);
+  const checkedImages = useMemo(
+    () => images.filter((image) => checkedKeySet.has(image.key)),
+    [checkedKeySet, images],
+  );
+  const checkedVisibleCount = filteredImages.filter((image) => checkedKeySet.has(image.key)).length;
+  const canBatchMove =
+    checkedImages.length > 0 && checkedImages.some((image) => image.folder !== moveFolder);
 
   useEffect(() => {
+    if (checkedImages.length > 0) return;
     if (selected) setMoveFolder(selected.folder);
-  }, [selected?.key, selected?.folder]);
+  }, [checkedImages.length, selected?.key, selected?.folder]);
+
+  useEffect(() => {
+    setCheckedKeys((current) => current.filter((key) => images.some((image) => image.key === key)));
+  }, [images]);
 
   const refreshData = async () => {
     setError(null);
@@ -206,6 +220,7 @@ export default function App() {
     setFolders([{ name: defaultFolder, imageCount: 0 }]);
     setUsage(null);
     setSelectedKey(null);
+    setCheckedKeys([]);
     setIsAuthenticated(false);
   };
 
@@ -313,8 +328,23 @@ export default function App() {
     }
   };
 
-  const moveImage = async () => {
-    if (!selected || selected.folder === moveFolder) return;
+  const toggleImageChecked = (key: string) => {
+    setCheckedKeys((current) =>
+      current.includes(key) ? current.filter((checkedKey) => checkedKey !== key) : [...current, key],
+    );
+  };
+
+  const checkVisibleImages = () => {
+    setCheckedKeys((current) => Array.from(new Set([...current, ...filteredImages.map((image) => image.key)])));
+  };
+
+  const clearCheckedImages = () => {
+    setCheckedKeys([]);
+  };
+
+  const moveImages = async (keys: string[]) => {
+    const moveKeys = Array.from(new Set(keys));
+    if (moveKeys.length === 0) return;
 
     setError(null);
 
@@ -325,7 +355,7 @@ export default function App() {
           'content-type': 'application/json',
         },
         body: JSON.stringify({
-          key: selected.key,
+          keys: moveKeys,
           targetFolder: moveFolder,
         }),
       }).then((response) => parseJsonResponse<ImagesResponse>(response));
@@ -333,11 +363,22 @@ export default function App() {
       setImages(payload.images);
       setFolders(payload.folders);
       setActiveFolder(moveFolder);
-      setSelectedKey(payload.images.find((image) => image.name === selected.name && image.folder === moveFolder)?.key ?? null);
+      setCheckedKeys([]);
+      setSelectedKey(payload.images.find((image) => image.folder === moveFolder)?.key ?? null);
       await refreshData();
     } catch (moveError) {
-      setError(moveError instanceof Error ? moveError.message : '移動圖片失敗');
+      setError(moveError instanceof Error ? moveError.message : '批次移動圖片失敗');
     }
+  };
+
+  const moveSelectedImage = async () => {
+    if (!selected || selected.folder === moveFolder) return;
+    await moveImages([selected.key]);
+  };
+
+  const moveCheckedImages = async () => {
+    if (!canBatchMove) return;
+    await moveImages(checkedKeys);
   };
 
   const totalSize = usage?.payloadSize ?? images.reduce((sum, image) => sum + image.size, 0);
@@ -422,7 +463,7 @@ export default function App() {
       <section className="summary-band" aria-label="R2 使用摘要">
         <div>
           <span>圖片數</span>
-          <strong>{usage?.objectCount ?? images.length}</strong>
+          <strong>{images.length}</strong>
         </div>
         <div>
           <span>儲存容量</span>
@@ -521,6 +562,22 @@ export default function App() {
             />
           </label>
 
+          <div className="batch-toolbar">
+            <span>
+              {checkedImages.length > 0
+                ? `已選 ${checkedImages.length} 張，目前列表 ${checkedVisibleCount} 張`
+                : '未選取圖片'}
+            </span>
+            <div>
+              <button onClick={checkVisibleImages} disabled={filteredImages.length === 0}>
+                全選
+              </button>
+              <button onClick={clearCheckedImages} disabled={checkedImages.length === 0}>
+                清除
+              </button>
+            </div>
+          </div>
+
           <div className="image-list">
             {isLoading ? (
               <div className="inline-state">
@@ -537,18 +594,25 @@ export default function App() {
             ) : null}
 
             {filteredImages.map((image) => (
-              <button
+              <div
                 key={image.key}
                 className={`image-row ${selected?.key === image.key ? 'is-selected' : ''}`}
                 onClick={() => setSelectedKey(image.key)}
               >
+                <input
+                  type="checkbox"
+                  checked={checkedKeySet.has(image.key)}
+                  aria-label={`選取 ${image.name}`}
+                  onClick={(event) => event.stopPropagation()}
+                  onChange={() => toggleImageChecked(image.key)}
+                />
                 <img src={image.url} alt={image.name} />
                 <span>
                   <strong>{image.name}</strong>
                   <small>{formatBytes(image.size)}</small>
                   <small>{image.folder}</small>
                 </span>
-              </button>
+              </div>
             ))}
           </div>
         </aside>
@@ -614,11 +678,32 @@ export default function App() {
                   </label>
                   <button
                     className="secondary-button"
-                    onClick={() => void moveImage()}
+                    onClick={() => void moveSelectedImage()}
                     disabled={!selected || selected.folder === moveFolder}
                   >
                     <MoveRight size={17} />
                     移動
+                  </button>
+                </div>
+
+                <div className="move-panel batch-move-panel">
+                  <label>
+                    <span>批次移動已選圖片</span>
+                    <select value={moveFolder} onChange={(event) => setMoveFolder(event.target.value)}>
+                      {folders.map((folder) => (
+                        <option key={folder.name} value={folder.name}>
+                          {folder.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <button
+                    className="secondary-button"
+                    onClick={() => void moveCheckedImages()}
+                    disabled={!canBatchMove}
+                  >
+                    <MoveRight size={17} />
+                    移動 {checkedImages.length || ''}
                   </button>
                 </div>
 
