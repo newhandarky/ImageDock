@@ -206,7 +206,7 @@ h2 {
   display: grid;
   grid-template-columns: minmax(360px, 440px) minmax(0, 1fr);
   gap: 18px;
-  align-items: start;
+  align-items: stretch;
 }
 
 .library-panel,
@@ -413,7 +413,7 @@ h2 {
   align-content: start;
   gap: 8px;
   flex: 1 1 auto;
-  min-height: 360px;
+  min-height: 0;
   overflow: auto;
   padding-right: 2px;
 }
@@ -484,7 +484,7 @@ h2 {
 }
 
 .detail-panel {
-  min-height: 560px;
+  min-height: 700px;
   overflow: hidden;
 }
 

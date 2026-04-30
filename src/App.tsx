@@ -334,6 +334,11 @@ export default function App() {
     );
   };
 
+  const selectAndToggleImage = (key: string) => {
+    setSelectedKey(key);
+    toggleImageChecked(key);
+  };
+
   const checkVisibleImages = () => {
     setCheckedKeys((current) => Array.from(new Set([...current, ...filteredImages.map((image) => image.key)])));
   };
@@ -597,7 +602,7 @@ export default function App() {
               <div
                 key={image.key}
                 className={`image-row ${selected?.key === image.key ? 'is-selected' : ''}`}
-                onClick={() => setSelectedKey(image.key)}
+                onClick={() => selectAndToggleImage(image.key)}
               >
                 <input
                   type="checkbox"
